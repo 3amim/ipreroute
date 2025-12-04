@@ -1,0 +1,11 @@
+displayName: "ipreroute"
+version: "v0.0.1"
+type: "middleware"
+import: "github.com/3amim/ipreroute"
+summary: "Reroute based on blocked IPs from Redis"
+testData: {}
+description: |
+  A Traefik plugin that checks incoming request IPs against a list of blocked IPs stored in Redis. If the IP exists in the list, the plugin silently reroutes the request to a specified target IP and port.
+  
+  This is fully transparent: the original request headers, including the Host, remain unchanged and the client does not see any redirect. 
+  Supports both HTTP and HTTPS with SNI, and is designed for high-load production environments.
