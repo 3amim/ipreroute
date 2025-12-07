@@ -1,22 +1,21 @@
 package ipreroute
 
 import (
+	"bufio"
 	"context"
 	"crypto/tls"
+	"fmt"
 	"log"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"strings"
 	"time"
-
-	"github.com/redis/go-redis/v9"
 )
 
 type IPReroute struct {
 	next   http.Handler
 	name   string
-	redis  *redis.Client
 	config *Config
 	proxy  *httputil.ReverseProxy
 }
@@ -39,18 +38,14 @@ func CreateConfig() *Config {
 
 func New(ctx context.Context, next http.Handler, config *Config, name string) (http.Handler, error) {
 
-	rdb := redis.NewClient(&redis.Options{
-		Addr: config.RedisAddress,
-	})
-
 	serverName := config.RerouteIP
 	if strings.Contains(serverName, ":") {
 		serverName = strings.Split(serverName, ":")[0]
 	}
 
 	proxy := &httputil.ReverseProxy{
-		Director: func(r *http.Request) {
-		},
+		Director: func(r *http.Request) {},
+
 		Transport: &http.Transport{
 			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
 				newAddr := net.JoinHostPort(config.RerouteIP, config.ReroutePort)
@@ -68,6 +63,7 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 				ServerName:         serverName,
 			},
 		},
+
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
 			log.Println("Proxy error:", err)
 			http.Error(w, "Bad Gateway", http.StatusBadGateway)
@@ -77,7 +73,6 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 	return &IPReroute{
 		next:   next,
 		name:   name,
-		redis:  rdb,
 		config: config,
 		proxy:  proxy,
 	}, nil
@@ -91,21 +86,39 @@ func (i *IPReroute) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 	ctx, cancel := context.WithTimeout(req.Context(), 50*time.Millisecond)
 	defer cancel()
 
-	ipExists, err := i.redis.Exists(ctx, key).Result()
-	if err != nil || ipExists != 1 {
+	exists, err := redisExists(ctx, i.config.RedisAddress, key)
+	if err != nil || !exists {
 		i.next.ServeHTTP(rw, req)
 		return
 	}
 
-	ttl, err := i.redis.TTL(ctx, key).Result()
-	if err != nil || ttl <= 0 {
-		i.next.ServeHTTP(rw, req)
-		return
-	}
-
-	log.Println("Silent HTTPS/HTTP reroute for IP:", clientIP, "TTL:", ttl)
-
+	log.Println("Silent HTTPS/HTTP reroute for IP:", clientIP)
 	i.proxy.ServeHTTP(rw, req)
+}
+
+func redisExists(ctx context.Context, addr, key string) (bool, error) {
+	dialer := net.Dialer{Timeout: 50 * time.Millisecond}
+	conn, err := dialer.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return false, err
+	}
+	defer conn.Close()
+
+	// Redis RESP: EXISTS key
+	cmd := fmt.Sprintf("*2\r\n$6\r\nEXISTS\r\n$%d\r\n%s\r\n", len(key), key)
+	_, err = conn.Write([]byte(cmd))
+	if err != nil {
+		return false, err
+	}
+
+	reader := bufio.NewReader(conn)
+	resp, err := reader.ReadString('\n')
+	if err != nil {
+		return false, err
+	}
+
+	// Redis integer response: :1 or :0
+	return strings.HasPrefix(resp, ":1"), nil
 }
 
 func getClientIP(req *http.Request) string {
