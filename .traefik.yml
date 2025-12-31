@@ -3,7 +3,11 @@ version: "v0.0.1"
 type: "middleware"
 import: "github.com/3amim/ipreroute"
 summary: "Reroute based on blocked IPs from Redis"
-testData: {}
+testData:
+  redisAddress: "redis:6379"
+  rerouteKey: "attacker_ip_"
+  rerouteIP: "127.0.0.1"
+  reroutePort: "443"
 description: |
   A Traefik plugin that checks incoming request IPs against a list of blocked IPs stored in Redis. If the IP exists in the list, the plugin silently reroutes the request to a specified target IP and port.
   

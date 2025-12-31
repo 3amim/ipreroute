@@ -21,7 +21,7 @@ type IPReroute struct {
 }
 
 type Config struct {
-	RedisAddress string `json:"redis,omitempty"`
+	RedisAddress string `json:"redisAddress,omitempty"`
 	RerouteKey   string `json:"rerouteKey,omitempty"`
 	RerouteIP    string `json:"rerouteIP,omitempty"`
 	ReroutePort  string `json:"reroutePort,omitempty"`
@@ -44,7 +44,10 @@ func New(ctx context.Context, next http.Handler, config *Config, name string) (h
 	}
 
 	proxy := &httputil.ReverseProxy{
-		Director: func(r *http.Request) {},
+		Director: func(r *http.Request) {
+			r.URL.Scheme = "http"
+			r.URL.Host = net.JoinHostPort(config.RerouteIP, config.ReroutePort)
+		},
 
 		Transport: &http.Transport{
 			DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
@@ -82,12 +85,21 @@ func (i *IPReroute) ServeHTTP(rw http.ResponseWriter, req *http.Request) {
 
 	clientIP := getClientIP(req)
 	key := i.config.RerouteKey + clientIP
+	
+	log.Println("DEBUG: Checking IP:", clientIP, "Key:", key)
 
 	ctx, cancel := context.WithTimeout(req.Context(), 50*time.Millisecond)
 	defer cancel()
 
 	exists, err := redisExists(ctx, i.config.RedisAddress, key)
-	if err != nil || !exists {
+	if err != nil {
+		log.Println("DEBUG: Redis error:", err)
+		i.next.ServeHTTP(rw, req)
+		return
+	}
+	
+	if !exists {
+		log.Println("DEBUG: IP not found in Redis")
 		i.next.ServeHTTP(rw, req)
 		return
 	}

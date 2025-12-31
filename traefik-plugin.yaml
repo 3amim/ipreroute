@@ -1,0 +1,11 @@
+displayName: IP Reroute Middleware
+description: Reroute requests from attacker IPs to a different destination using Redis for IP blacklist lookup
+type: middleware
+import: local/ipreroute
+summary: Reroute requests based on IP using Redis
+testData:
+  redisAddress: "redis:6379"
+  rerouteKey: "attacker_ip_"
+  rerouteIP: "127.0.0.1"
+  reroutePort: "443"
+
